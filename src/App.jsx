@@ -3,13 +3,17 @@ import { useEffect, useMemo, useState } from "react";
 export default function App() {
   const [balanceCents, setBalanceCents] = useState(0);
   const [history, setHistory] = useState([]);
-  const [milestones, setMilestones] = useState([200, 500, 1000]);
+  const [milestones, setMilestones] = useState([200, 500, 1000]); // max 10€
   const [achieved, setAchieved] = useState([]);
   const [theme, setTheme] = useState("light");
   const [weeklyGoalCents, setWeeklyGoalCents] = useState(500);
   const [customNote, setCustomNote] = useState("");
+  const [calendar, setCalendar] = useState({}); // { 'YYYY-MM-DD': true }
 
   const STORAGE_KEY = "reward-app-eur-v5";
+  const CALENDAR_KEY = "reward-app-calendar";
+
+  // Load persisted state
   useEffect(() => {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -23,13 +27,23 @@ export default function App() {
         if (typeof data.weeklyGoalCents === "number") setWeeklyGoalCents(data.weeklyGoalCents);
       } catch {}
     }
+    const rawCal = localStorage.getItem(CALENDAR_KEY);
+    if (rawCal) {
+      try { setCalendar(JSON.parse(rawCal)); } catch {}
+    }
   }, []);
 
+  // Persist
   useEffect(() => {
     const data = { balanceCents, history, milestones, achieved, theme, weeklyGoalCents };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [balanceCents, history, milestones, achieved, theme, weeklyGoalCents]);
 
+  useEffect(() => {
+    localStorage.setItem(CALENDAR_KEY, JSON.stringify(calendar));
+  }, [calendar]);
+
+  // Helpers
   const fmtEUR = (cents) => (cents/100).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
   const prettyDate = (ts) => {
     const d = new Date(ts);
@@ -39,48 +53,68 @@ export default function App() {
 
   function startOfWeek(date = new Date()) {
     const d = new Date(date);
-    const day = (d.getDay() + 6) % 7;
+    const day = (d.getDay() + 6) % 7; // start Monday
     d.setHours(0,0,0,0);
     d.setDate(d.getDate() - day);
     return d;
   }
+  function endOfWeek(date = new Date()) {
+    const d = startOfWeek(date);
+    d.setDate(d.getDate() + 6);
+    d.setHours(23,59,59,999);
+    return d;
+  }
 
   const weekStart = useMemo(() => startOfWeek(), []);
-  const weekEnd = useMemo(() => {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + 7);
-    return d;
-  }, [weekStart]);
+  const weekEnd = useMemo(() => endOfWeek(), []);
 
   const earnedThisWeekCents = useMemo(() => {
     return history
-      .filter(h => h.ts >= weekStart.getTime() && h.ts < weekEnd.getTime())
+      .filter(h => h.ts >= weekStart.getTime() && h.ts <= weekEnd.getTime())
       .reduce((s, h) => s + h.deltaCents, 0);
   }, [history, weekStart, weekEnd]);
 
   const weekProgress = Math.max(0, Math.min(1, weeklyGoalCents ? earnedThisWeekCents / weeklyGoalCents : 0));
 
+  // Mark calendar week when target is reached
+  useEffect(() => {
+    const key = weekStart.toISOString().slice(0,10);
+    if (earnedThisWeekCents >= weeklyGoalCents && !calendar[key]) {
+      setCalendar({ ...calendar, [key]: true });
+    }
+  }, [earnedThisWeekCents, weeklyGoalCents, weekStart]);
+
+  // Reasons
   const standardReasons = [
-    { label: "Messo a posto i giochi", delta: 30 },
-    { label: "Gentile", delta: 30 },
-    { label: "Finito pranzo/cena", delta: 30 },
-    { label: "Non ho ubbidito", delta: -30 },
-    { label: "Parolaccia", delta: -20 },
-    { label: "Bugia", delta: -30 },
+    { label: "Mettere apposto i giochi", delta: 30 },
+    { label: "Aiutare gli altri/e", delta: 30 },
+    { label: "Finire i pasti", delta: 30 },
+    { label: "Ricevere un complimento dalle maestre", delta: 50 },
+    { label: "Vestirsi da solo", delta: 30 },
+    { label: "Apparecchiare/sparecchiare", delta: 30 },
+    { label: "Disubbidire", delta: -30 },
+    { label: "Dire le parolacce", delta: -20 },
+    { label: "Dire le bugie", delta: -30 },
+    { label: "Offendere gli altri", delta: -30 },
+    { label: "Allontanarsi senza permesso", delta: -30 },
+    { label: "Rifiutarsi di condividere", delta: -30 },
   ];
 
+  // Actions
   function add(deltaCents, reason) {
     const newBal = Math.max(0, balanceCents + deltaCents);
     setBalanceCents(newBal);
     const entry = { id: crypto.randomUUID(), deltaCents, note: reason, ts: Date.now() };
-    setHistory((h) => [entry, ...h].slice(0, 500));
+    setHistory(h => [entry, ...h].slice(0, 500));
   }
 
   function resetAll() {
     setBalanceCents(0);
     setHistory([]);
     setAchieved([]);
+    setCalendar({});
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(CALENDAR_KEY);
   }
 
   function clearHistory() {
@@ -90,11 +124,12 @@ export default function App() {
   }
 
   useEffect(() => {
-    const reached = milestones.filter((m) => balanceCents >= m);
+    const reached = milestones.filter(m => balanceCents >= m);
     setAchieved(reached);
   }, [balanceCents, milestones]);
 
-  const emoji = useMemo(() => (balanceCents >= 1000 ? "🌟" : balanceCents >= 500 ? "🙂" : "🐣"), [balanceCents]);
+  const emoji = (balanceCents >= 1000 ? "🌟" : balanceCents >= 500 ? "🙂" : "🐣");
+  const weekLabel = `${weekStart.toLocaleDateString("it-IT", { weekday: 'long', day: 'numeric', month: 'long' })} → ${weekEnd.toLocaleDateString("it-IT", { weekday: 'long', day: 'numeric', month: 'long' })}`;
 
   return (
     <div className={theme==="dark" ? "dark" : ""}>
@@ -106,7 +141,7 @@ export default function App() {
               <div>
                 <h1 className="text-2xl md:text-3xl font-bold">Ricompense di DANI</h1>
                 <p className="text-lg font-bold mt-1">Totale: {fmtEUR(balanceCents)}</p>
-                <p className="text-sm opacity-80">Sistema di ricompense in euro – semplice e visivo</p>
+                <p className="text-sm opacity-80">Valutazione settimana: {weekLabel}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -160,7 +195,6 @@ export default function App() {
 
             <div className="bg-white/70 dark:bg-white/10 border border-black/10 rounded-2xl p-5 shadow">
               <h2 className="text-xl font-bold mb-3">Obiettivi e premi</h2>
-              <p className="text-sm opacity-75 mb-3">Quando il bilancio supera un obiettivo, si guadagna una ⭐.</p>
               <div className="flex flex-wrap gap-2 mb-4">
                 {milestones.filter(m => m <= 1000).map((m, i) => (
                   <span
@@ -219,13 +253,20 @@ export default function App() {
             )}
           </section>
 
-          <section className="mt-8 opacity-80 text-sm">
-            <h4 className="font-semibold mb-2">Suggerimenti rapidi per l'uso</h4>
-            <ul className="list-disc pl-5 space-y-1">
-              <li></li>
-              <li></li>
-              <li></li>
-            </ul>
+          <section className="mt-8">
+            <h3 className="text-xl font-bold mb-3">Calendario annuale dei target raggiunti</h3>
+            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2">
+              {Array.from({length: 52}).map((_,i)=>{
+                const d = new Date(new Date().getFullYear(),0,1);
+                d.setDate(d.getDate() + i*7);
+                const key = startOfWeek(d).toISOString().slice(0,10);
+                const reached = calendar[key];
+                const month = d.toLocaleDateString("it-IT", { month: 'short' });
+                return (
+                  <div key={i} className={"p-2 text-center rounded-lg border "+(reached?"bg-emerald-300/70 border-emerald-600":"bg-white/60 border-black/10")}>W{i+1}<div className="text-xs opacity-70">{month}</div></div>
+                );
+              })}
+            </div>
           </section>
 
           <footer className="mt-10 text-center text-xs opacity-60">© 2025 – Sistema Ricompense familiare</footer>
