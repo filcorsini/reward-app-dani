@@ -86,7 +86,7 @@ export default function App() {
 
   // Reasons
   const standardReasons = [
-    { label: "Mettere apposto i giochi", delta: 30 },
+    { label: "Mettere a posto i giochi", delta: 30 },
     { label: "Aiutare gli altri/e", delta: 30 },
     { label: "Finire i pasti", delta: 30 },
     { label: "Ricevere un complimento dalle maestre", delta: 50 },
